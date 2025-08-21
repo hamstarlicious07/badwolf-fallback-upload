@@ -1,0 +1,110 @@
+<!doctype html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bad Wolf — Quick Photo</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto; margin:0; padding:16px; background:#111; color:#eee; }
+    .btn { padding:14px 16px; border:0; border-radius:12px; font-weight:700; background:#6c4df8; color:#fff; }
+    .row { display:flex; gap:8px; align-items:center; }
+    #toast { position:fixed; left:50%; bottom:22px; transform:translateX(-50%); background:#222; color:#fff;
+      padding:10px 14px; border-radius:999px; opacity:0; transition:opacity .25s; }
+    #url { width:100%; padding:10px; border-radius:10px; border:1px solid #333; background:#1a1a1a; color:#ddd; }
+    .stack { display:flex; gap:10px; }
+  </style>
+</head>
+<body>
+  <h2 style="margin-top:0;">Take a photo</h2>
+  <p style="margin-top:0.4rem;color:#bbb">Capture or upload → we optimize → upload → URL auto-copied</p>
+
+  <!-- Hidden inputs -->
+  <input id="cam"  type="file" accept="image/*" capture="environment" style="display:none">
+  <input id="pick" type="file" accept="image/*"                           style="display:none">
+
+  <div class="stack">
+    <button id="openCam"  class="btn">📸 Take a photo</button>
+    <button id="openPick" class="btn">🖼️ Upload from Gallery</button>
+  </div>
+
+  <div class="row" style="margin-top:14px; display:none" id="out">
+    <input id="url" readonly>
+    <button id="copy" class="btn" style="white-space:nowrap">Copy</button>
+  </div>
+
+  <div id="toast"></div>
+
+<script>
+  // 🟣 EDIT THESE TWO
+  const CLOUD_NAME    = "dbvq3eily";
+  const UPLOAD_PRESET = "badwolf_unsigned";
+
+  const cam     = document.getElementById('cam');
+  const pick    = document.getElementById('pick');
+  const openCam = document.getElementById('openCam');
+  const openPick= document.getElementById('openPick');
+  const out     = document.getElementById('out');
+  const urlEl   = document.getElementById('url');
+  const copyB   = document.getElementById('copy');
+  const toast   = document.getElementById('toast');
+
+  function showToast(msg){ toast.textContent = msg; toast.style.opacity = 1; setTimeout(()=>toast.style.opacity=0, 1600); }
+
+  // Resize to keep files tiny but clear
+  async function downscale(file, maxW=1280, maxH=1280, quality=0.72){
+    const img = await createImageBitmap(file);
+    let {width:w, height:h} = img;
+    const scale = Math.min(1, maxW/w, maxH/h);
+    const canvas = new OffscreenCanvas(w*scale, h*scale);
+    const ctx = canvas.getContext('2d', {alpha:false});
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    const blob = await canvas.convertToBlob({type:'image/jpeg', quality});
+    return blob;
+  }
+
+  async function uploadToCloudinary(blob){
+    const fd = new FormData();
+    fd.append("file", blob);
+    fd.append("upload_preset", UPLOAD_PRESET);
+    fd.append("folder", "badwolf/transactions"); // optional
+
+    const r = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`, { method:'POST', body:fd });
+    if(!r.ok) throw new Error('Upload failed');
+    return r.json(); // { secure_url, ... }
+  }
+
+  async function handleFile(file, from='camera'){
+    if(!file) return;
+    const btn = from==='camera' ? openCam : openPick;
+    const original = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Uploading…';
+    try{
+      const small = await downscale(file);
+      const info  = await uploadToCloudinary(small);
+      urlEl.value = info.secure_url;
+      out.style.display = 'flex';
+      try{ await navigator.clipboard.writeText(info.secure_url); showToast('✅ URL copied'); }
+      catch{ showToast('URL ready — tap Copy'); }
+    }catch(err){
+      console.error(err);
+      showToast('Upload failed');
+    }finally{
+      btn.disabled = false; btn.textContent = original;
+      cam.value = ''; pick.value = '';
+    }
+  }
+
+  // Triggers
+  openCam .addEventListener('click', ()=> cam.click());       // opens camera
+  openPick.addEventListener('click', ()=> pick.click());      // opens gallery immediately
+
+  cam .addEventListener('change', e => handleFile(e.target.files?.[0], 'camera'));
+  pick.addEventListener('change', e => handleFile(e.target.files?.[0], 'picker'));
+
+  copyB.addEventListener('click', async ()=>{
+    try{ await navigator.clipboard.writeText(urlEl.value); showToast('✅ Copied'); }
+    catch{ showToast('Copy blocked — long-press URL'); }
+  });
+</script>
+</body>
+</html>
